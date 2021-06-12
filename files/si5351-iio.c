@@ -12,6 +12,7 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/regulator/consumer.h>
+#include <linux/version.h>
 #include <asm/unaligned.h>
 #include <asm/div64.h>
 
@@ -120,7 +121,9 @@ static ssize_t si5351_read_ext(struct iio_dev *indio_dev,
 static const struct iio_info si5351_info = {
 	.read_raw = si5351_read_raw,
 	.write_raw = si5351_write_raw,
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,0,0)
 	.driver_module = THIS_MODULE,
+#endif	
 };
 
 static const struct iio_chan_spec_ext_info si5351_ext_info[] = {
