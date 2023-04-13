@@ -12,7 +12,6 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/regulator/consumer.h>
-#include <linux/version.h>
 #include <asm/unaligned.h>
 #include <asm/div64.h>
 
@@ -78,8 +77,18 @@ static ssize_t si5351_write_ext(struct iio_dev *indio_dev,
 		ret = 0;
 		break;
 	case SI5351_PHASE:
-		st->phase_cache[chan->channel] = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, (unsigned int)readin);
-		si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
+		if (readin<180)
+		{
+			st->phase_cache[chan->channel] = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, (unsigned int)readin);
+			si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
+		}
+		else
+		{
+			st->phase_cache[chan->channel] = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, (unsigned int)readin-180);
+			st->phase_cache[chan->channel] += 180;
+			si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 1);
+		}
+
 		ret = 0;
 		break;
 	default:
@@ -105,8 +114,8 @@ static ssize_t si5351_read_ext(struct iio_dev *indio_dev,
 		val = st->freq_cache[chan->channel];
 		break;
 	case SI5351_PHASE:
-			val = st->phase_cache[chan->channel];
-			break;
+		val = st->phase_cache[chan->channel];
+		break;
 	default:
 		ret = -EINVAL;
 		val = 0;
@@ -121,9 +130,6 @@ static ssize_t si5351_read_ext(struct iio_dev *indio_dev,
 static const struct iio_info si5351_info = {
 	.read_raw = si5351_read_raw,
 	.write_raw = si5351_write_raw,
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,0,0)
-	.driver_module = THIS_MODULE,
-#endif	
 };
 
 static const struct iio_chan_spec_ext_info si5351_ext_info[] = {
@@ -366,6 +372,11 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 			    &b, &c);
 	}
 
+	if (b==0)
+		params.intmode=1;
+	else
+		params.intmode=0;
+
 	/* recalculate fout by fOUT = fIN / (a + b/c) */
 	lltmp  = fVCO;
 	lltmp *= c;
@@ -412,7 +423,7 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 		i2c_smbus_write_byte_data(i2c, start_reg + 2, val);
 
 		val = i2c_smbus_read_byte_data(i2c, SI5351_CLK0_CTRL + output);
-		if (params.p2 == 0)
+		if (params.intmode == 1)
 			val |= SI5351_CLK_INTEGER_MODE;
 		else
 			val &= ~SI5351_CLK_INTEGER_MODE;
