@@ -648,6 +648,7 @@ static int si5351_identify(struct i2c_client *client)
 static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *id)
 {
 		struct iio_dev *indio_dev;
+		struct device_node *np = i2c->dev.of_node;
 		struct si5351_state *st;
 		unsigned int i;
 		int ret;
@@ -668,6 +669,7 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 		if (indio_dev == NULL)
 			return  -ENOMEM;
 
+
 		st = iio_priv(indio_dev);
 		dev_set_drvdata(&i2c->dev, indio_dev);
 
@@ -676,6 +678,10 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 
 		indio_dev->dev.parent = &i2c->dev;
 		indio_dev->name = id->name;
+		if (IS_ENABLED(CONFIG_OF) && np)
+			of_property_read_string(np, "devname", &indio_dev->name);
+		else
+			dev_dbg(&i2c->dev, "using default name\n");
 		indio_dev->info = &si5351_info;
 		indio_dev->modes = INDIO_DIRECT_MODE;
 		indio_dev->channels = st->chip_info->channels;
