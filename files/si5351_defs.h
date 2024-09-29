@@ -170,8 +170,7 @@ enum si5351_variant {
 #define SI5351_MAX_CHANNELS 8
 #define PLL_A 0
 #define PLL_B 1
-#define MASTER_RATE 870000000
-#define XTAL_RATE 25000000
+#define DEFAULT_XTAL_RATE 25000000
 
 enum {
 	SI5351_FREQ,

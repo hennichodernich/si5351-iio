@@ -44,7 +44,7 @@ static unsigned int si5351_ctrl_msynth(struct i2c_client *i2c, unsigned int outp
 static void si5351_safe_defaults(struct i2c_client *i2c);
 static int si5351_identify(struct i2c_client *client);
 static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *id);
-static int si5351_i2c_remove(struct i2c_client *i2c);
+static void si5351_i2c_remove(struct i2c_client *i2c);
 static int __init si5351_i2c_register_driver(void);
 static void __exit si5351_i2c_unregister_driver(void);
 static int __init si5351_init(void);

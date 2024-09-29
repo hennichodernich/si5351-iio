@@ -652,6 +652,7 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 		struct si5351_state *st;
 		unsigned int i;
 		int ret;
+		unsigned int xtal_rate = DEFAULT_XTAL_RATE;
 
 		if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		{
@@ -682,6 +683,14 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 			of_property_read_string(np, "devname", &indio_dev->name);
 		else
 			dev_dbg(&i2c->dev, "using default name\n");
+
+		if (IS_ENABLED(CONFIG_OF) && np)
+		{
+			ret = of_property_read_u32(np, "xtal-freq", &xtal_rate);
+			if(ret)
+                		xtal_rate = DEFAULT_XTAL_RATE;
+		}
+
 		indio_dev->info = &si5351_info;
 		indio_dev->modes = INDIO_DIRECT_MODE;
 		indio_dev->channels = st->chip_info->channels;
@@ -695,19 +704,17 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 
 		si5351_safe_defaults(i2c);
 
-		st->fVCO = si5351_setup_pll(i2c, PLL_A, MASTER_RATE, XTAL_RATE);
-		printk(KERN_INFO "si5351-iio: Si5351 detected, using PLL_A VCO freq = %d MHz\n", st->fVCO/1000000);
+		st->fVCO = si5351_setup_pll(i2c, PLL_A, 32*xtal_rate, xtal_rate);
+		printk(KERN_INFO "si5351-iio: Si5351 detected, xtal freq = %d MHz, using PLL_A VCO freq = %d MHz\n", xtal_rate/1000000, st->fVCO/1000000);
 
 		return 0;
 }
 
-static int si5351_i2c_remove(struct i2c_client *i2c)
+static void si5351_i2c_remove(struct i2c_client *i2c)
 {
 		struct iio_dev *indio_dev = dev_get_drvdata(&i2c->dev);
 
 		iio_device_unregister(indio_dev);
-
-		return 0;
 }
 
 static const struct i2c_device_id si5351_i2c_ids[] = {
