@@ -21,40 +21,6 @@
 #include "si5351_defs.h"
 #include "si5351-iio.h"
 
-static int si5351_read_raw(struct iio_dev *indio_dev,
-			   struct iio_chan_spec const *chan,
-			   int *val,
-			   int *val2,
-			   long m)
-{
-	switch (m) {
-	case IIO_CHAN_INFO_RAW:
-		*val = 0;
-		return IIO_VAL_INT;
-	case IIO_CHAN_INFO_SCALE:
-		*val = 1;
-		return IIO_VAL_INT;
-	default:
-		break;
-	}
-	return -EINVAL;
-}
-
-static int si5351_write_raw(struct iio_dev *indio_dev,
-	struct iio_chan_spec const *chan, int val, int val2, long mask)
-{	int ret;
-
-	switch (mask) {
-	case IIO_CHAN_INFO_RAW:
-		ret = 0;
-		break;
-	default:
-		ret = -EINVAL;
-	}
-
-	return ret;
-}
-
 static ssize_t si5351_write_ext(struct iio_dev *indio_dev,
 				    uintptr_t private,
 				    const struct iio_chan_spec *chan,
@@ -63,6 +29,7 @@ static ssize_t si5351_write_ext(struct iio_dev *indio_dev,
 	struct si5351_state *st = iio_priv(indio_dev);
 	struct i2c_client *i2c = to_i2c_client(st->dev);
 	unsigned long long readin;
+	unsigned int phase, new_freq, new_phase;
 	int ret;
 
 	ret = kstrtoull(buf, 10, &readin);
@@ -72,28 +39,25 @@ static ssize_t si5351_write_ext(struct iio_dev *indio_dev,
 	mutex_lock(&indio_dev->mlock);
 	switch ((u32)private) {
 	case SI5351_FREQ:
-		st->freq_cache[chan->channel] = si5351_config_msynth(i2c, chan->channel, PLL_A, (unsigned int)readin, st->fVCO);
+		ret = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, (unsigned int)readin, st->fVCO, st->phase_cache[chan->channel], &new_freq, &new_phase);
 		si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
 		ret = 0;
 		break;
 	case SI5351_PHASE:
 		if (readin<180)
-		{
-			st->phase_cache[chan->channel] = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, (unsigned int)readin);
-			si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
-		}
+			phase = (unsigned int)readin;
 		else
-		{
-			st->phase_cache[chan->channel] = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, (unsigned int)readin-180);
-			st->phase_cache[chan->channel] += 180;
-			si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 1);
-		}
-
-		ret = 0;
+			phase = (unsigned int)(readin-180);
+		ret = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, phase, &new_freq, &new_phase);
+		si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, (readin<180)?0:1);
+		if (!(readin<180))
+			new_phase += 180;
 		break;
 	default:
 		ret = -EINVAL;
 	}
+	st->freq_cache[chan->channel] = new_freq;
+	st->phase_cache[chan->channel] = new_phase;
 	mutex_unlock(&indio_dev->mlock);
 
 	return ret ? ret : len;
@@ -128,8 +92,6 @@ static ssize_t si5351_read_ext(struct iio_dev *indio_dev,
 
 
 static const struct iio_info si5351_info = {
-	.read_raw = si5351_read_raw,
-	.write_raw = si5351_write_raw,
 };
 
 static const struct iio_chan_spec_ext_info si5351_ext_info[] = {
@@ -157,8 +119,7 @@ static const struct iio_chan_spec_ext_info si5351_ext_info[] = {
 	.indexed = 1,						\
 	.output = 1,						\
 	.channel = (chan),					\
-	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |		\
-	BIT(IIO_CHAN_INFO_SCALE),					\
+	.info_mask_separate = 0,				\
 	.address = addr,					\
 	.scan_type = {						\
 		.sign = 'u',					\
@@ -308,32 +269,32 @@ static inline u8 si5351_msynth_params_address(int num)
 	return SI5351_CLK0_PARAMETERS + (SI5351_PARAMETERS_LENGTH * num);
 }
 
-static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout, unsigned int fVCO)
+static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout_target, const unsigned int fVCO, unsigned int phase_target, unsigned int *fout_real, unsigned int *phase_real)
 {
 	struct si5351_multisynth_parameters params;
-	unsigned long a, b, c;
+	unsigned long a, b, c, phase_val;
 	unsigned long long lltmp;
 	int divby4;
 	u8 start_reg;
 	int val;
 
 	/* multisync6-7 can only handle freqencies < 150MHz */
-	if (output >= 6 && fout > SI5351_MULTISYNTH67_MAX_FREQ)
-		fout = SI5351_MULTISYNTH67_MAX_FREQ;
+	if (output >= 6 && fout_target > SI5351_MULTISYNTH67_MAX_FREQ)
+		fout_target = SI5351_MULTISYNTH67_MAX_FREQ;
 
 	/* multisync frequency is 1MHz .. 160MHz */
-	if (fout > SI5351_MULTISYNTH_MAX_FREQ)
-		fout = SI5351_MULTISYNTH_MAX_FREQ;
-	if (fout < SI5351_MULTISYNTH_MIN_FREQ)
-		fout = SI5351_MULTISYNTH_MIN_FREQ;
+	if (fout_target > SI5351_MULTISYNTH_MAX_FREQ)
+		fout_target = SI5351_MULTISYNTH_MAX_FREQ;
+	if (fout_target < SI5351_MULTISYNTH_MIN_FREQ)
+		fout_target = SI5351_MULTISYNTH_MIN_FREQ;
 
 	divby4 = 0;
-	if (fout > SI5351_MULTISYNTH_DIVBY4_FREQ)
+	if (fout_target > SI5351_MULTISYNTH_DIVBY4_FREQ)
 		divby4 = 1;
 
 	if (output >= 6) {
 		/* determine the closest integer divider */
-		a = DIV_ROUND_CLOSEST(fVCO, fout);
+		a = DIV_ROUND_CLOSEST(fVCO, fout_target);
 		if (a < SI5351_MULTISYNTH_A_MIN)
 			a = SI5351_MULTISYNTH_A_MIN;
 		if (a > SI5351_MULTISYNTH67_A_MAX)
@@ -346,12 +307,12 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 
 		/* disable divby4 */
 		if (divby4) {
-			fout = SI5351_MULTISYNTH_DIVBY4_FREQ;
+			fout_target = SI5351_MULTISYNTH_DIVBY4_FREQ;
 			divby4 = 0;
 		}
 
 		/* determine integer part of divider equation */
-		a = fVCO / fout;
+		a = fVCO / fout_target;
 		if (a < SI5351_MULTISYNTH_A_MIN)
 			a = SI5351_MULTISYNTH_A_MIN;
 		if (a > SI5351_MULTISYNTH_A_MAX)
@@ -359,9 +320,9 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 
 		/* find best approximation for b/c = fVCO mod fOUT */
 		denom = 1000 * 1000;
-		lltmp = (fVCO) % fout;
+		lltmp = (fVCO) % fout_target;
 		lltmp *= denom;
-		do_div(lltmp, fout);
+		do_div(lltmp, fout_target);
 		rfrac = (unsigned long)lltmp;
 
 		b = 0;
@@ -371,17 +332,16 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 			    SI5351_MULTISYNTH_B_MAX, SI5351_MULTISYNTH_C_MAX,
 			    &b, &c);
 	}
-
-	if (b==0)
+	if ((b==0) && (phase_target==0))
 		params.intmode=1;
 	else
 		params.intmode=0;
 
-	/* recalculate fout by fOUT = fIN / (a + b/c) */
+	/* recalculate fout_target by fOUT = fIN / (a + b/c) */
 	lltmp  = fVCO;
 	lltmp *= c;
 	do_div(lltmp, a * c + b);
-	fout  = (unsigned long)lltmp;
+	*fout_real  = (unsigned int)lltmp;
 
 	/* calculate parameters */
 	if (divby4) {
@@ -400,16 +360,34 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 		params.p1 -= 512;
 	}
 
+	lltmp = fVCO;
+	lltmp *= phase_target;
+	do_div(lltmp, *fout_real * 90);
+	phase_val = (unsigned int)lltmp;
+	//phase_val = (fVCO / *fout_real) * phase_target / 90;
+	if (phase_val > 127)
+	{
+		phase_val = 127;
+		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %d\n", phase_val);
+	}
+	lltmp = *fout_real;
+	lltmp *= phase_val;
+	lltmp *= 90;
+	do_div(lltmp, fVCO);
+	*phase_real = (unsigned int)lltmp;
+	//*phase_real = phase_val * 90 / (fVCO / *fout_real);
+
 	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%d\n", fVCO);
 	dev_dbg(&i2c->dev, "si5351-iio: found a=%d, b=%d, c=%d\n", a, b, c);
 	dev_dbg(&i2c->dev, "si5351-iio: found p1=%d, p2=%d, p3=%d, divby4=%d\n", params.p1, params.p2, params.p3, divby4);
-	dev_dbg(&i2c->dev, "si5351-iio: fout=%d\n", fout);
+	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%d\n", *fout_real);
+	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%d\n", phase_val);
 
 	start_reg = si5351_msynth_params_address(output);
 	/* write multisynth parameters */
 	si5351_write_parameters(i2c, start_reg, &params);
 
-	if (fout > SI5351_MULTISYNTH_DIVBY4_FREQ)
+	if (fout_target > SI5351_MULTISYNTH_DIVBY4_FREQ)
 		divby4 = 1;
 
 	/* enable/disable integer mode and divby4 on multisynth0-5 */
@@ -428,141 +406,6 @@ static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int ou
 		else
 			val &= ~SI5351_CLK_INTEGER_MODE;
 		i2c_smbus_write_byte_data(i2c, SI5351_CLK0_CTRL + output, val);
-	}
-
-	val = i2c_smbus_read_byte_data(i2c, SI5351_CLK0_CTRL + output);
-	if (pll == PLL_B)
-		val |= SI5351_CLK_PLL_SELECT;
-	else
-		val &= ~SI5351_CLK_PLL_SELECT;
-	i2c_smbus_write_byte_data(i2c, SI5351_CLK0_CTRL + output, val);
-
-	dev_dbg(&i2c->dev, "si5351-iio: wrote CTRL byte %02x\n", val);
-
-	return fout;
-}
-
-static unsigned int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout, unsigned int fVCO, unsigned int degrees)
-{
-	struct si5351_multisynth_parameters params;
-	unsigned long a, b, c, phase_val;
-	unsigned long long lltmp;
-	int divby4;
-	u8 start_reg;
-	int val;
-
-	/* multisync6-7 can only handle freqencies < 150MHz */
-	if (output >= 6 && fout > SI5351_MULTISYNTH67_MAX_FREQ)
-		fout = SI5351_MULTISYNTH67_MAX_FREQ;
-
-	/* multisync frequency is 1MHz .. 160MHz */
-	if (fout > SI5351_MULTISYNTH_MAX_FREQ)
-		fout = SI5351_MULTISYNTH_MAX_FREQ;
-	if (fout < SI5351_MULTISYNTH_MIN_FREQ)
-		fout = SI5351_MULTISYNTH_MIN_FREQ;
-
-	divby4 = 0;
-	if (fout > SI5351_MULTISYNTH_DIVBY4_FREQ)
-		divby4 = 1;
-
-	if (output >= 6) {
-		/* determine the closest integer divider */
-		a = DIV_ROUND_CLOSEST(fVCO, fout);
-		if (a < SI5351_MULTISYNTH_A_MIN)
-			a = SI5351_MULTISYNTH_A_MIN;
-		if (a > SI5351_MULTISYNTH67_A_MAX)
-			a = SI5351_MULTISYNTH67_A_MAX;
-
-		b = 0;
-		c = 1;
-	} else {
-		unsigned long rfrac, denom;
-
-		/* disable divby4 */
-		if (divby4) {
-			fout = SI5351_MULTISYNTH_DIVBY4_FREQ;
-			divby4 = 0;
-		}
-
-		/* determine integer part of divider equation */
-		a = fVCO / fout;
-		if (a < SI5351_MULTISYNTH_A_MIN)
-			a = SI5351_MULTISYNTH_A_MIN;
-		if (a > SI5351_MULTISYNTH_A_MAX)
-			a = SI5351_MULTISYNTH_A_MAX;
-
-		/* find best approximation for b/c = fVCO mod fOUT */
-		denom = 1000 * 1000;
-		lltmp = (fVCO) % fout;
-		lltmp *= denom;
-		do_div(lltmp, fout);
-		rfrac = (unsigned long)lltmp;
-
-		b = 0;
-		c = 1;
-		if (rfrac)
-			rational_best_approximation(rfrac, denom,
-			    SI5351_MULTISYNTH_B_MAX, SI5351_MULTISYNTH_C_MAX,
-			    &b, &c);
-	}
-
-	/* recalculate fout by fOUT = fIN / (a + b/c) */
-	lltmp  = fVCO;
-	lltmp *= c;
-	do_div(lltmp, a * c + b);
-	fout  = (unsigned long)lltmp;
-
-	/* calculate parameters */
-	if (divby4) {
-		params.p3 = 1;
-		params.p2 = 0;
-		params.p1 = 0;
-	} else if (output >= 6) {
-		params.p3 = 0;
-		params.p2 = 0;
-		params.p1 = a;
-	} else {
-		params.p3  = c;
-		params.p2  = (128 * b) % c;
-		params.p1  = 128 * a;
-		params.p1 += (128 * b / c);
-		params.p1 -= 512;
-	}
-
-	phase_val = (fVCO / fout) * degrees / 90;
-	if (phase_val > 127)
-	{
-		phase_val = 127;
-		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %d\n", phase_val);
-	}
-	degrees = phase_val * 90 / (fVCO / fout);
-
-	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%d\n", fVCO);
-	dev_dbg(&i2c->dev, "si5351-iio: found a=%d, b=%d, c=%d\n", a, b, c);
-	dev_dbg(&i2c->dev, "si5351-iio: found p1=%d, p2=%d, p3=%d, divby4=%d\n", params.p1, params.p2, params.p3, divby4);
-	dev_dbg(&i2c->dev, "si5351-iio: fout=%d\n", fout);
-	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%d\n", phase_val);
-
-	start_reg = si5351_msynth_params_address(output);
-	/* write multisynth parameters */
-	si5351_write_parameters(i2c, start_reg, &params);
-
-	if (fout > SI5351_MULTISYNTH_DIVBY4_FREQ)
-		divby4 = 1;
-
-	/* enable/disable integer mode and divby4 on multisynth0-5 */
-	if (output < 6)
-	{
-		val = i2c_smbus_read_byte_data(i2c, start_reg + 2);
-		if (divby4)
-			val |= SI5351_OUTPUT_CLK_DIVBY4;
-		else
-			val &= ~SI5351_OUTPUT_CLK_DIVBY4;
-		i2c_smbus_write_byte_data(i2c, start_reg + 2, val);
-
-		val = i2c_smbus_read_byte_data(i2c, SI5351_CLK0_CTRL + output);
-		val &= ~SI5351_CLK_INTEGER_MODE;
-		i2c_smbus_write_byte_data(i2c, SI5351_CLK0_CTRL + output, val);
 		i2c_smbus_write_byte_data(i2c, SI5351_CLK0_PHASE_OFFSET + output, phase_val & 0x7F);
 		dev_dbg(&i2c->dev, "si5351-iio: readback phase offset %d\n", i2c_smbus_read_byte_data(i2c, SI5351_CLK0_PHASE_OFFSET + output));
 	}
@@ -580,7 +423,7 @@ static unsigned int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned 
 
 	dev_dbg(&i2c->dev, "si5351-iio: wrote CTRL byte %02x\n", val);
 
-	return degrees;
+	return 0;
 }
 
 
@@ -698,6 +541,7 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 
 		for (i = 0; i < st->chip_info->num_channels; ++i) {
 			st->freq_cache[i] = 0;
+			st->phase_cache[i] = 0;
 		}
 
 		ret = iio_device_register(indio_dev);

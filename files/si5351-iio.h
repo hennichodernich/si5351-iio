@@ -15,14 +15,6 @@
 
 #include "si5351_defs.h"
 
-static int si5351_read_raw(struct iio_dev *indio_dev,
-			   struct iio_chan_spec const *chan,
-			   int *val,
-			   int *val2,
-			   long m);
-static int si5351_write_raw(struct iio_dev *indio_dev,
-	struct iio_chan_spec const *chan, int val, int val2, long mask);
-
 static ssize_t si5351_write_ext(struct iio_dev *indio_dev,
 				    uintptr_t private,
 				    const struct iio_chan_spec *chan,
@@ -38,8 +30,7 @@ static int si5351_setup_pll(struct i2c_client *i2c, unsigned int pll, unsigned i
 
 static inline u8 si5351_msynth_params_address(int num);
 
-static unsigned int si5351_config_msynth(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout, unsigned int fVCO);
-static unsigned int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout, unsigned int fVCO, unsigned int degrees);
+static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout_target, const unsigned int fVCO, unsigned int phase_target, unsigned int *fout_real, unsigned int *phase_real);
 static unsigned int si5351_ctrl_msynth(struct i2c_client *i2c, unsigned int output, unsigned int enable, unsigned int input, unsigned int strength, unsigned int inversion);
 static void si5351_safe_defaults(struct i2c_client *i2c);
 static int si5351_identify(struct i2c_client *client);
