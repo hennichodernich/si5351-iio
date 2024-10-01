@@ -171,6 +171,7 @@ enum si5351_variant {
 #define PLL_A 0
 #define PLL_B 1
 #define DEFAULT_XTAL_RATE 25000000
+#define TUNE_STEP 500
 
 enum {
 	SI5351_FREQ,
@@ -196,6 +197,8 @@ struct si5351_state {
 	unsigned int			freq_cache[SI5351_MAX_CHANNELS];
 	unsigned int			phase_cache[SI5351_MAX_CHANNELS];
 	unsigned int			fVCO;
+	unsigned int			xtal_rate;
+	int 				quad_mode;
 	/*
 	 * DMA (thus cache coherency maintenance) requires the
 	 * transfer buffers to live in their own cache lines.

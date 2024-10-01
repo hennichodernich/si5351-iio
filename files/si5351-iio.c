@@ -39,25 +39,54 @@ static ssize_t si5351_write_ext(struct iio_dev *indio_dev,
 	mutex_lock(&indio_dev->mlock);
 	switch ((u32)private) {
 	case SI5351_FREQ:
-		ret = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, (unsigned int)readin, st->fVCO, st->phase_cache[chan->channel], &new_freq, &new_phase);
-		si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
+		if (st->quad_mode)
+		{
+			st->fVCO = si5351_retune_pll_and_config_msynth_quad(i2c, PLL_A, st->xtal_rate, (unsigned int)readin, &new_freq, &new_phase);
+			si5351_ctrl_msynth(i2c, 0, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
+			si5351_ctrl_msynth(i2c, 1, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
+		}
+		else
+		{
+			ret = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, (unsigned int)readin, st->fVCO, st->phase_cache[chan->channel], &new_freq, &new_phase);
+			si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, 0);
+		}
 		ret = 0;
 		break;
 	case SI5351_PHASE:
-		if (readin<180)
-			phase = (unsigned int)readin;
+		if (st->quad_mode)
+			ret = -EINVAL;
 		else
-			phase = (unsigned int)(readin-180);
-		ret = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, phase, &new_freq, &new_phase);
-		si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, (readin<180)?0:1);
-		if (!(readin<180))
-			new_phase += 180;
+		{
+			if (readin<180)
+				phase = (unsigned int)readin;
+			else
+				phase = (unsigned int)(readin-180);
+			ret = si5351_config_msynth_phase(i2c, chan->channel, PLL_A, st->freq_cache[chan->channel], st->fVCO, phase, &new_freq, &new_phase);
+			si5351_ctrl_msynth(i2c, chan->channel, 1, SI5351_CLK_INPUT_MULTISYNTH_N, SI5351_CLK_DRIVE_STRENGTH_8MA, (readin<180)?0:1);
+			if (!(readin<180))
+				new_phase += 180;
+			ret = 0;
+		}
 		break;
 	default:
 		ret = -EINVAL;
 	}
-	st->freq_cache[chan->channel] = new_freq;
-	st->phase_cache[chan->channel] = new_phase;
+
+	if (ret == 0)
+	{
+		if (st->quad_mode)
+		{
+			st->freq_cache[0] = new_freq;
+			st->freq_cache[1] = new_freq;
+			st->phase_cache[0] = 0;
+			st->phase_cache[1] = new_phase;
+		}
+		else
+		{
+			st->freq_cache[chan->channel] = new_freq;
+			st->phase_cache[chan->channel] = new_phase;
+		}
+	}
 	mutex_unlock(&indio_dev->mlock);
 
 	return ret ? ret : len;
@@ -242,8 +271,8 @@ static int si5351_setup_pll(struct i2c_client *i2c, unsigned int pll, unsigned i
 		fVCO  = (unsigned long)lltmp;
 		fVCO += fXTAL * a;
 
-		dev_dbg(&i2c->dev, "si5351-iio: found a=%d, b=%d, c=%d\n", a, b, c);
-		dev_dbg(&i2c->dev, "si5351-iio: found p1=%d, p2=%d, p3=%d\n", params.p1, params.p2, params.p3);
+		dev_dbg(&i2c->dev, "si5351-iio: found a=%u, b=%u, c=%u\n", (unsigned int)a,  (unsigned int)b,  (unsigned int)c);
+		dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u\n",  (unsigned int)params.p1,  (unsigned int)params.p2,  (unsigned int)params.p3);
 
 		si5351_write_parameters(i2c, start_reg, &params);
 		/* plla/pllb ctrl is in clk6/clk7 ctrl registers */
@@ -368,7 +397,7 @@ static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int outpu
 	if (phase_val > 127)
 	{
 		phase_val = 127;
-		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %d\n", phase_val);
+		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %u\n",  (unsigned int)phase_val);
 	}
 	lltmp = *fout_real;
 	lltmp *= phase_val;
@@ -377,11 +406,11 @@ static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int outpu
 	*phase_real = (unsigned int)lltmp;
 	//*phase_real = phase_val * 90 / (fVCO / *fout_real);
 
-	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%d\n", fVCO);
-	dev_dbg(&i2c->dev, "si5351-iio: found a=%d, b=%d, c=%d\n", a, b, c);
-	dev_dbg(&i2c->dev, "si5351-iio: found p1=%d, p2=%d, p3=%d, divby4=%d\n", params.p1, params.p2, params.p3, divby4);
-	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%d\n", *fout_real);
-	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%d\n", phase_val);
+	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%u\n", fVCO);
+	dev_dbg(&i2c->dev, "si5351-iio: found a=%u, b=%u, c=%u\n",  (unsigned int)a,  (unsigned int)b,  (unsigned int)c);
+	dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u, divby4=%u\n",  (unsigned int)params.p1,  (unsigned int)params.p2,  (unsigned int)params.p3,  (unsigned int)divby4);
+	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%u\n", *fout_real);
+	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%u\n",  (unsigned int)phase_val);
 
 	start_reg = si5351_msynth_params_address(output);
 	/* write multisynth parameters */
@@ -466,6 +495,145 @@ static unsigned int si5351_ctrl_msynth(struct i2c_client *i2c, unsigned int outp
 	return bits;
 }
 
+static int si5351_retune_pll_and_config_msynth_quad(struct i2c_client *i2c, unsigned int pll, unsigned int fXTAL, unsigned int fout_target, unsigned int *fout_real, unsigned int *phase_real)
+{
+	struct si5351_multisynth_parameters pll_params, msynth_params;
+	unsigned long a, b, c, c_start, d;
+	long b_start;
+	unsigned long long lltmp;
+	int val;
+	unsigned int fVCO;
+	unsigned int phase_val;
+	int output;
+	unsigned int fout_by_step;
+
+	unsigned int start_reg = (pll == PLL_A) ? SI5351_PLLA_PARAMETERS : SI5351_PLLB_PARAMETERS;
+		
+	fout_by_step = fout_target / TUNE_STEP;
+
+	a = 32;
+	c_start = fXTAL / TUNE_STEP;
+	d = SI5351_PLL_VCO_MIN / fout_target;
+	while(d <= (SI5351_PLL_VCO_MAX / fout_target))
+	{
+		b_start = (fout_by_step * d) - (a * c_start);
+		if ((b_start >= 0) && (b_start <= (c_start-1)))
+			break;
+		else
+			d++;
+	}
+
+	if ((b_start < 0) || (b_start > (c_start-1)))
+	{
+		dev_err(&i2c->dev, "si5351-iio: can't tune to %d Hz\n", fout_target);
+		b_start = 0;
+	}
+
+	b = 0;
+	c = 1;
+	rational_best_approximation(b_start, c_start, SI5351_PLL_B_MAX, SI5351_PLL_C_MAX, &b, &c);
+
+	/* calculate parameters */
+	pll_params.p3  = c;
+	pll_params.p2  = (128 * b) % c;
+	pll_params.p1  = 128 * a;
+	pll_params.p1 += (128 * b / c);
+	pll_params.p1 -= 512;
+
+	/* recalculate rate by fIN * (a + b/c) */
+	lltmp  = fXTAL;
+	lltmp *= b;
+	do_div(lltmp, c);
+
+	fVCO  = (unsigned long)lltmp;
+	fVCO += fXTAL * a;
+
+	dev_dbg(&i2c->dev, "si5351-iio: found a=%u, b=%u, c=%u\n",  (unsigned int)a,  (unsigned int)b,  (unsigned int)c);
+	dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u\n",  (unsigned int)pll_params.p1,  (unsigned int)pll_params.p2,  (unsigned int)pll_params.p3);
+
+	si5351_write_parameters(i2c, start_reg, &pll_params);
+	/* plla/pllb ctrl is in clk6/clk7 ctrl registers */
+	val = i2c_smbus_read_byte_data(i2c, SI5351_CLK6_CTRL + pll);
+	if (pll_params.p2 == 0)
+		val |= SI5351_CLK_INTEGER_MODE;
+	else
+		val &= ~SI5351_CLK_INTEGER_MODE;
+	i2c_smbus_write_byte_data(i2c, SI5351_CLK6_CTRL + pll, val);
+
+	/* Do a pll soft reset on the affected pll */
+	i2c_smbus_write_byte_data(i2c, SI5351_PLL_RESET, (pll == PLL_A) ? SI5351_PLL_RESET_A : SI5351_PLL_RESET_B);
+
+	// msynth part starts here
+	lltmp  = fVCO;
+	do_div(lltmp, d);
+	*fout_real  = (unsigned int)lltmp;
+
+	/* calculate parameters */
+	msynth_params.p3  = 1;
+	msynth_params.p2  = 0;
+	msynth_params.p1  = 128 * d;
+	msynth_params.p1 -= 512;
+
+	lltmp = fVCO;
+	do_div(lltmp, *fout_real);
+	phase_val = (unsigned int)lltmp;
+	if (phase_val > 127)
+	{
+		phase_val = 127;
+		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %u\n",  (unsigned int)phase_val);
+	}
+	lltmp = *fout_real;
+	lltmp *= phase_val;
+	lltmp *= 90;
+	do_div(lltmp, fVCO);
+	*phase_real = (unsigned int)lltmp;
+
+	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%u\n", fVCO);
+	dev_dbg(&i2c->dev, "si5351-iio: found d=%u\n",  (unsigned int)d);
+	dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u\n",  (unsigned int)msynth_params.p1,  (unsigned int)msynth_params.p2,  (unsigned int)msynth_params.p3);
+	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%u\n", *fout_real);
+	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%u\n",  (unsigned int)phase_val);
+
+	/* enable/disable integer mode and divby4 on multisynth0-5 */
+	for (output=0; 2 > output;++output)
+	{
+		start_reg = si5351_msynth_params_address(output);
+		/* write multisynth parameters */
+		si5351_write_parameters(i2c, start_reg, &msynth_params);
+
+		val = i2c_smbus_read_byte_data(i2c, start_reg + 2);
+		val &= ~SI5351_OUTPUT_CLK_DIVBY4;
+		i2c_smbus_write_byte_data(i2c, start_reg + 2, val);
+
+		val = i2c_smbus_read_byte_data(i2c, SI5351_CLK0_CTRL + output);
+		val &= ~SI5351_CLK_INTEGER_MODE;
+		i2c_smbus_write_byte_data(i2c, SI5351_CLK0_CTRL + output, val);
+		if(output==1)
+			i2c_smbus_write_byte_data(i2c, SI5351_CLK0_PHASE_OFFSET + output, phase_val & 0x7F);
+		else
+			i2c_smbus_write_byte_data(i2c, SI5351_CLK0_PHASE_OFFSET + output, 0);
+
+		dev_dbg(&i2c->dev, "si5351-iio: readback phase offset %d\n", i2c_smbus_read_byte_data(i2c, SI5351_CLK0_PHASE_OFFSET + output));
+	}
+
+	i2c_smbus_write_byte_data(i2c, SI5351_PLL_RESET, (pll == PLL_A) ? SI5351_PLL_RESET_A : SI5351_PLL_RESET_B);
+
+	for (output=0; 2 > output;++output)
+	{
+		val = i2c_smbus_read_byte_data(i2c, SI5351_CLK0_CTRL + output);
+		if (pll == PLL_B)
+			val |= SI5351_CLK_PLL_SELECT;
+		else
+			val &= ~SI5351_CLK_PLL_SELECT;
+		i2c_smbus_write_byte_data(i2c, SI5351_CLK0_CTRL + output, val);
+
+		dev_dbg(&i2c->dev, "si5351-iio: wrote CTRL byte %02x\n", val);
+	}
+
+		return fVCO;
+
+}	
+
 static void si5351_safe_defaults(struct i2c_client *i2c)
 {
 	int i;
@@ -495,7 +663,6 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 		struct si5351_state *st;
 		unsigned int i;
 		int ret;
-		unsigned int xtal_rate = DEFAULT_XTAL_RATE;
 
 		if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		{
@@ -527,12 +694,21 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 		else
 			dev_dbg(&i2c->dev, "using default name\n");
 
+		st->xtal_rate = DEFAULT_XTAL_RATE;
 		if (IS_ENABLED(CONFIG_OF) && np)
 		{
-			ret = of_property_read_u32(np, "xtal-freq", &xtal_rate);
+			ret = of_property_read_u32(np, "xtal-freq", &st->xtal_rate);
 			if(ret)
-                		xtal_rate = DEFAULT_XTAL_RATE;
+                		st->xtal_rate = DEFAULT_XTAL_RATE;
 		}
+		st->quad_mode = 0;
+		if (IS_ENABLED(CONFIG_OF) && np)
+		{
+			if (of_property_read_bool(np, "quadrature-mode"))
+                		st->quad_mode = 1;
+		}
+		if (st->quad_mode==1)
+			dev_dbg(&i2c->dev, "si5351-iio: quadrature mode detected\n");
 
 		indio_dev->info = &si5351_info;
 		indio_dev->modes = INDIO_DIRECT_MODE;
@@ -548,8 +724,8 @@ static int si5351_i2c_probe(struct i2c_client *i2c,	const struct i2c_device_id *
 
 		si5351_safe_defaults(i2c);
 
-		st->fVCO = si5351_setup_pll(i2c, PLL_A, 32*xtal_rate, xtal_rate);
-		printk(KERN_INFO "si5351-iio: Si5351 detected, xtal freq = %d MHz, using PLL_A VCO freq = %d MHz\n", xtal_rate/1000000, st->fVCO/1000000);
+		st->fVCO = si5351_setup_pll(i2c, PLL_A, 32*st->xtal_rate, st->xtal_rate);
+		printk(KERN_INFO "si5351-iio: Si5351 detected, xtal freq = %d MHz, using PLL_A VCO freq = %d MHz\n", st->xtal_rate/1000000, st->fVCO/1000000);
 
 		return 0;
 }

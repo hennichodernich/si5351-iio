@@ -30,6 +30,8 @@ static int si5351_setup_pll(struct i2c_client *i2c, unsigned int pll, unsigned i
 
 static inline u8 si5351_msynth_params_address(int num);
 
+static int si5351_retune_pll_and_config_msynth_quad(struct i2c_client *i2c, unsigned int pll, unsigned int fXTAL, unsigned int fout_target, unsigned int *fout_real, unsigned int *phase_real);
+
 static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout_target, const unsigned int fVCO, unsigned int phase_target, unsigned int *fout_real, unsigned int *phase_real);
 static unsigned int si5351_ctrl_msynth(struct i2c_client *i2c, unsigned int output, unsigned int enable, unsigned int input, unsigned int strength, unsigned int inversion);
 static void si5351_safe_defaults(struct i2c_client *i2c);
