@@ -271,8 +271,8 @@ static int si5351_setup_pll(struct i2c_client *i2c, unsigned int pll, unsigned i
 		fVCO  = (unsigned long)lltmp;
 		fVCO += fXTAL * a;
 
-		dev_dbg(&i2c->dev, "si5351-iio: found a=%u, b=%u, c=%u\n", (unsigned int)a,  (unsigned int)b,  (unsigned int)c);
-		dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u\n",  (unsigned int)params.p1,  (unsigned int)params.p2,  (unsigned int)params.p3);
+		dev_dbg(&i2c->dev, "si5351-iio: found a=%lu, b=%lu, c=%lu\n", a,  b,  c);
+		dev_dbg(&i2c->dev, "si5351-iio: found p1=%lu, p2=%lu, p3=%lu\n", params.p1, params.p2, params.p3);
 
 		si5351_write_parameters(i2c, start_reg, &params);
 		/* plla/pllb ctrl is in clk6/clk7 ctrl registers */
@@ -392,12 +392,12 @@ static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int outpu
 	lltmp = fVCO;
 	lltmp *= phase_target;
 	do_div(lltmp, *fout_real * 90);
-	phase_val = (unsigned int)lltmp;
+	phase_val = (unsigned long)lltmp;
 	//phase_val = (fVCO / *fout_real) * phase_target / 90;
 	if (phase_val > 127)
 	{
 		phase_val = 127;
-		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %u\n",  (unsigned int)phase_val);
+		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %lu\n",  phase_val);
 	}
 	lltmp = *fout_real;
 	lltmp *= phase_val;
@@ -407,10 +407,10 @@ static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int outpu
 	//*phase_real = phase_val * 90 / (fVCO / *fout_real);
 
 	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%u\n", fVCO);
-	dev_dbg(&i2c->dev, "si5351-iio: found a=%u, b=%u, c=%u\n",  (unsigned int)a,  (unsigned int)b,  (unsigned int)c);
-	dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u, divby4=%u\n",  (unsigned int)params.p1,  (unsigned int)params.p2,  (unsigned int)params.p3,  (unsigned int)divby4);
+	dev_dbg(&i2c->dev, "si5351-iio: found a=%lu, b=%lu, c=%lu\n", a, b, c);
+	dev_dbg(&i2c->dev, "si5351-iio: found p1=%lu, p2=%lu, p3=%lu, divby4=%d\n", params.p1, params.p2, params.p3, divby4);
 	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%u\n", *fout_real);
-	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%u\n",  (unsigned int)phase_val);
+	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%lu\n",  phase_val);
 
 	start_reg = si5351_msynth_params_address(output);
 	/* write multisynth parameters */
@@ -502,7 +502,7 @@ static int si5351_retune_pll_and_config_msynth_quad(struct i2c_client *i2c, unsi
 	long b_start;
 	unsigned long long lltmp;
 	int val;
-	unsigned int fVCO;
+	unsigned long fVCO;
 	unsigned int phase_val;
 	int output;
 	unsigned int fout_by_step;
@@ -525,7 +525,7 @@ static int si5351_retune_pll_and_config_msynth_quad(struct i2c_client *i2c, unsi
 
 	if ((b_start < 0) || (b_start > (c_start-1)))
 	{
-		dev_err(&i2c->dev, "si5351-iio: can't tune to %d Hz\n", fout_target);
+		dev_err(&i2c->dev, "si5351-iio: can't tune to %u Hz\n", fout_target);
 		b_start = 0;
 	}
 
@@ -548,8 +548,8 @@ static int si5351_retune_pll_and_config_msynth_quad(struct i2c_client *i2c, unsi
 	fVCO  = (unsigned long)lltmp;
 	fVCO += fXTAL * a;
 
-	dev_dbg(&i2c->dev, "si5351-iio: found a=%u, b=%u, c=%u\n",  (unsigned int)a,  (unsigned int)b,  (unsigned int)c);
-	dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u\n",  (unsigned int)pll_params.p1,  (unsigned int)pll_params.p2,  (unsigned int)pll_params.p3);
+	dev_dbg(&i2c->dev, "si5351-iio: found a=%lu, b=%lu, c=%lu\n", a, b, c);
+	dev_dbg(&i2c->dev, "si5351-iio: found p1=%lu, p2=%lu, p3=%lu\n", pll_params.p1, pll_params.p2, pll_params.p3);
 
 	si5351_write_parameters(i2c, start_reg, &pll_params);
 	/* plla/pllb ctrl is in clk6/clk7 ctrl registers */
@@ -588,11 +588,11 @@ static int si5351_retune_pll_and_config_msynth_quad(struct i2c_client *i2c, unsi
 	do_div(lltmp, fVCO);
 	*phase_real = (unsigned int)lltmp;
 
-	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%u\n", fVCO);
-	dev_dbg(&i2c->dev, "si5351-iio: found d=%u\n",  (unsigned int)d);
-	dev_dbg(&i2c->dev, "si5351-iio: found p1=%u, p2=%u, p3=%u\n",  (unsigned int)msynth_params.p1,  (unsigned int)msynth_params.p2,  (unsigned int)msynth_params.p3);
+	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%lu\n", fVCO);
+	dev_dbg(&i2c->dev, "si5351-iio: found d=%lu\n", d);
+	dev_dbg(&i2c->dev, "si5351-iio: found p1=%lu, p2=%lu, p3=%lu\n", msynth_params.p1, msynth_params.p2, msynth_params.p3);
 	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%u\n", *fout_real);
-	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%u\n",  (unsigned int)phase_val);
+	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%u\n", phase_val);
 
 	/* enable/disable integer mode and divby4 on multisynth0-5 */
 	for (output=0; 2 > output;++output)
