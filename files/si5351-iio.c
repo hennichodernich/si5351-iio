@@ -138,49 +138,40 @@ static const struct iio_chan_spec_ext_info si5351_ext_info[] = {
 	.private = SI5351_PHASE, \
 	.shared = IIO_SEPARATE, \
 },
-//	IIO_ENUM("powerdown_mode", IIO_SEPARATE, &ad5064_powerdown_mode_enum),
-//	IIO_ENUM_AVAILABLE("powerdown_mode", &ad5064_powerdown_mode_enum),
 	{ },
 };
 
-#define SI5351_CHANNEL(chan, addr, bits, _shift, _ext_info) {		\
+#define SI5351_CHANNEL(chan, _ext_info) {		\
 	.type = IIO_VOLTAGE,					\
 	.indexed = 1,						\
 	.output = 1,						\
 	.channel = (chan),					\
 	.info_mask_separate = 0,				\
-	.address = addr,					\
-	.scan_type = {						\
-		.sign = 'u',					\
-		.realbits = (bits),				\
-		.storagebits = 16,				\
-		.shift = (_shift),				\
-	},							\
 	.ext_info = (_ext_info),				\
 }
 
-#define DECLARE_SI5351C_CHANNELS(name, bits, shift, ext_info) \
+#define DECLARE_SI5351C_CHANNELS(name, ext_info) \
 const struct iio_chan_spec name[] = { \
-	SI5351_CHANNEL(0, 0, bits, shift, ext_info), \
-	SI5351_CHANNEL(1, 1, bits, shift, ext_info), \
-	SI5351_CHANNEL(2, 2, bits, shift, ext_info), \
-	SI5351_CHANNEL(3, 3, bits, shift, ext_info), \
-	SI5351_CHANNEL(4, 4, bits, shift, ext_info), \
-	SI5351_CHANNEL(5, 5, bits, shift, ext_info), \
-	SI5351_CHANNEL(6, 6, bits, shift, ext_info), \
-	SI5351_CHANNEL(7, 7, bits, shift, ext_info), \
+	SI5351_CHANNEL(0, ext_info), \
+	SI5351_CHANNEL(1, ext_info), \
+	SI5351_CHANNEL(2, ext_info), \
+	SI5351_CHANNEL(3, ext_info), \
+	SI5351_CHANNEL(4, ext_info), \
+	SI5351_CHANNEL(5, ext_info), \
+	SI5351_CHANNEL(6, ext_info), \
+	SI5351_CHANNEL(7, ext_info), \
 }
 
-#define DECLARE_SI5351A_CHANNELS(name, bits, shift, ext_info) \
+#define DECLARE_SI5351A_CHANNELS(name, ext_info) \
 const struct iio_chan_spec name[] = { \
-	SI5351_CHANNEL(0, 0, bits, shift, ext_info), \
-	SI5351_CHANNEL(1, 1, bits, shift, ext_info), \
-	SI5351_CHANNEL(2, 2, bits, shift, ext_info), \
+	SI5351_CHANNEL(0, ext_info), \
+	SI5351_CHANNEL(1, ext_info), \
+	SI5351_CHANNEL(2, ext_info), \
 }
 
 
-static DECLARE_SI5351A_CHANNELS(si5351a_channels, 16, 0, si5351_ext_info);
-static DECLARE_SI5351C_CHANNELS(si5351c_channels, 16, 0, si5351_ext_info);
+static DECLARE_SI5351A_CHANNELS(si5351a_channels, si5351_ext_info);
+static DECLARE_SI5351C_CHANNELS(si5351c_channels, si5351_ext_info);
 
 static const struct si5351_chip_info si5351_chip_info_tbl[] = {
 	[ID_SI5351A] = {
