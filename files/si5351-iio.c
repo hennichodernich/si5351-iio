@@ -1,6 +1,7 @@
 /*
  *
  * Licensed under the GPL-2.
+ * Based on the si5351-clk driver
  */
 
 #include <linux/device.h>
@@ -292,7 +293,7 @@ static inline u8 si5351_msynth_params_address(int num)
 static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int output, unsigned int pll, unsigned int fout_target, const unsigned int fVCO, unsigned int phase_target, unsigned int *fout_real, unsigned int *phase_real)
 {
 	struct si5351_multisynth_parameters params;
-	unsigned long a, b, c, phase_val;
+	unsigned long a, b, c, phase_val, ultmp;
 	unsigned long long lltmp;
 	int divby4;
 	u8 start_reg;
@@ -362,6 +363,7 @@ static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int outpu
 	lltmp *= c;
 	do_div(lltmp, a * c + b);
 	*fout_real  = (unsigned int)lltmp;
+	//fout_real = f_VCO * c / (a*c + b)
 
 	/* calculate parameters */
 	if (divby4) {
@@ -380,28 +382,43 @@ static int si5351_config_msynth_phase(struct i2c_client *i2c, unsigned int outpu
 		params.p1 -= 512;
 	}
 
-	lltmp = fVCO;
+	lltmp = a*c + b;
 	lltmp *= phase_target;
-	do_div(lltmp, *fout_real * 90);
+	do_div(lltmp, c * 90);
 	phase_val = (unsigned long)lltmp;
-	//phase_val = (fVCO / *fout_real) * phase_target / 90;
+	/*
+	The formula for phase_val calculation is: phase_val = (fVCO / *fout_real) * phase_target / 90
+	
+	with fout_real = f_VCO * c / (a*c + b) from above we get
+	
+	phase_val = ((a*c + b) / c ) * phase_target / 90
+	*/
 	if (phase_val > 127)
 	{
+		dev_err(&i2c->dev, "si5351-iio: limiting phase_val from %lu to 127\n", phase_val);
 		phase_val = 127;
-		dev_err(&i2c->dev, "si5351-iio: limiting phase_val to %lu\n",  phase_val);
 	}
 	lltmp = *fout_real;
 	lltmp *= phase_val;
 	lltmp *= 90;
 	do_div(lltmp, fVCO);
 	*phase_real = (unsigned int)lltmp;
-	//*phase_real = phase_val * 90 / (fVCO / *fout_real);
+	/*
+	The chip implements phase shift by time shifting. The formula for the time shift is
+       	Delta_t = phase_val / (4*fVCO)
+	
+	With the general relation phase = Delta_t * fout * 360 we get
+	phase = phase_val * fout * 90 / fVCO
+	*/
 
+	dev_dbg(&i2c->dev, "si5351-iio: target freq=%u\n", fout_target);
+	dev_dbg(&i2c->dev, "si5351-iio: target phase=%u\n", phase_target);
 	dev_dbg(&i2c->dev, "si5351-iio: using fVCO=%u\n", fVCO);
 	dev_dbg(&i2c->dev, "si5351-iio: found a=%lu, b=%lu, c=%lu\n", a, b, c);
 	dev_dbg(&i2c->dev, "si5351-iio: found p1=%lu, p2=%lu, p3=%lu, divby4=%d\n", params.p1, params.p2, params.p3, divby4);
 	dev_dbg(&i2c->dev, "si5351-iio: fout_real=%u\n", *fout_real);
 	dev_dbg(&i2c->dev, "si5351-iio: phase_val=%lu\n",  phase_val);
+	dev_dbg(&i2c->dev, "si5351-iio: phase_real=%lu\n",  *phase_real);
 
 	start_reg = si5351_msynth_params_address(output);
 	/* write multisynth parameters */
